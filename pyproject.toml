@@ -1,0 +1,23 @@
+[project]
+name = "research-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dotenv>=0.9.9",
+    "langchain-openai>=0.3.33",
+    "langgraph>=0.6.8",
+    "langsmith>=0.4.31",
+    "loguru>=0.7.3",
+    "torch",
+    "torchvision",
+]
+
+[tool.uv.sources]
+torch = { path = "../torch/torch-2.8.0+cu126-cp311-cp311-win_amd64.whl" }
+torchvision = { path = "../torch/torchvision-0.23.0+cu126-cp311-cp311-win_amd64.whl" }
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
