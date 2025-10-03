@@ -28,15 +28,29 @@ class Agent:
             openai_api_key=os.getenv("QWEN_API_KEY"),
             openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
-        self.supervisor_llm = llm = ChatOpenAI(
+        self.supervisor_llm = ChatOpenAI(
             openai_api_base="http://localhost:11434/v1",
             openai_api_key="ollama",
-            model="qwen3_lora_sft_q8_0"
+            model="qwen3_lora_sft_supervisor_dpo",
+        )
+        self.memory_llm = ChatOpenAI(
+            openai_api_base="http://localhost:11434/v1",
+            openai_api_key="ollama",
+            model="qwen3_lora_sft_memory_q8_0"
         )
         self.langsmith_client = LangsmithClient.langsmith_client()
+        
+        
+    def get_long_memory(self, question: str) -> str:
+        response = self.memory_llm.invoke([SystemMessage(content="判断下面用户问题是否存在可以作为长记忆的重要信息，如果有则提取关键信息（短句或关键词），否则返回<None>。"), HumanMessage(content=question)])
+        response = response.content.split("\n")[-1]
+        if response == "<None>":
+            return ""
+        else:
+            return response
 
     def supervisor_node(self, state: state.State) -> str:
-        print(">>> Supervisor Node")
+        logger.info(">>> Supervisor Node")
         
         # 如果已经有type，结束
         if "type" in state:
@@ -58,17 +72,17 @@ class Agent:
 
 
     def search_node(self, state: state.State) -> str:
-        print(">>> Search Node")
+        logger.info(">>> Search Node")
         return {"message": [HumanMessage(content="搜索响应")], "type": "search"}
 
 
     def rag_node(self, state: state.State) -> str:
-        print(">>> RAG Node")
+        logger.info(">>> RAG Node")
         return {"message": [HumanMessage(content="RAG响应")], "type": "rag"}
 
 
     def chat_node(self, state: state.State) -> str:
-        print(">>> Chat Node")
+        logger.info(">>> Chat Node")
         
         response = self.llm.invoke(state["message"][-1].content)
 
@@ -76,7 +90,7 @@ class Agent:
 
 
     def other_node(self, state: state.State) -> str:
-        print(">>> Other Node")
+        logger.info(">>> Other Node")
         return {"message": [HumanMessage(content="无法回答")], "type": "other"}
 
 
