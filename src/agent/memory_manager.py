@@ -2,17 +2,31 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from loguru import logger
 import time
+import os
 
 class Memory_Manager:
-    def __init__(self, llm=None):
+    def __init__(self):
         self.memory_llm = ChatOpenAI(
             openai_api_base="http://localhost:11434/v1",
             openai_api_key="ollama",
             model="qwen3_lora_sft_memory_q8_0"
         )
-        self.llm = llm
+        self.llm = ChatOpenAI(
+            model="qwen3-next-80b-a3b-thinking",
+            openai_api_key=os.getenv("QWEN_API_KEY"),
+            openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
         
-    def get_long_memory(self, question: str) -> str:
+    # 进行任务路由
+    def task_routing(self, question: str, type: str) -> str:
+        """根据问题和类型进行任务路由，返回节点名称"""
+        if type == "extract":
+            return self.get_long_memory(question)
+        elif type == "summarize":
+            return self.summarize_search_result(question)
+        
+        
+    def extract_message(self, question: str) -> str:
         """从问题中提取长记忆信息"""
         response = self.memory_llm.invoke([SystemMessage(content="判断下面用户问题是否存在可以作为长记忆的重要信息，如果有则提取关键信息（短句或关键词），否则返回<None>。"), HumanMessage(content=question)])
         response = response.content.split("\n")[-1]
@@ -21,11 +35,11 @@ class Memory_Manager:
         else:
             return response
         
-    def _async_get_long_memory(self, question: str):
-        """异步执行get_long_memory，不阻塞主流程"""
-        logger.info("Starting async long memory extraction...")
+    def get_long_memory(self, question: str):
+        """获取长记忆并保存到文件"""
+        logger.info("Starting long memory extraction...")
         try:
-            memory_info = self.get_long_memory(question)
+            memory_info = self.extract_message(question)
             if memory_info:
                 # 写入一个jsonl文件,每条数据的格式为{"time": "当前时间", "memory": "内容"}
                 with open("C:\\Users\\71949\\Desktop\\research_agent\\resource\\long_memory\\long_memory.jsonl", "a", encoding="utf-8") as f:

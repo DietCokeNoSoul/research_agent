@@ -21,8 +21,9 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 
 from agent.langsmith_client import LangsmithClient
-from agent.memory_manager import Memory_Manager
+# from agent.memory_manager import Memory_Manager
 from agent.mcp_agent import MCPClient
+from agent.celery.tasks import send_memory_message
 import agent.state as state
 
 class Agent:
@@ -44,7 +45,7 @@ class Agent:
         # 取带工具的agent
         self.mcp_client = MCPClient(llm=self.llm)
         # 记忆管理器
-        self.memory_manager = Memory_Manager(llm=self.llm)
+        # self.memory_manager = Memory_Manager(llm=self.llm)
         # Langsmith客户端
         self.langsmith_client = LangsmithClient.langsmith_client()
         
@@ -85,9 +86,9 @@ class Agent:
         # 如果没有获取到结果，使用默认消息
         if not search_result:
             search_result = "搜索完成，但未找到相关结果。"
-            
-        if len(search_result) > 500:  # 短结果直接返回
-            search_result = self.memory_manager.summarize_search_result(search_result) # 结果过长，进行总结
+
+        # if len(search_result) > 500:  # 短结果直接返回
+        #     send_memory_message.delay({"type": "summarize", "text": search_result, "ts": int(time.time())})
 
         return {"message": [AIMessage(content=search_result)], "type": "search"}
 
@@ -123,15 +124,18 @@ class Agent:
             return END
 
 
-    def agent(self, question: str, clear_mcp_history: bool = False):
+    def agent(self, question: str):
         
-        # 启动异步任务处理长记忆，不阻塞graph执行
-        memory_thread = threading.Thread(
-            target=self.memory_manager._async_get_long_memory,
-            args=(question,),
-            daemon=True  # 设置为守护线程，主程序结束时自动结束
-        )
-        memory_thread.start()
+        # # 启动异步任务处理长记忆，不阻塞graph执行
+        # memory_thread = threading.Thread(
+        #     target=self.memory_manager._async_get_long_memory,
+        #     args=(question,),
+        #     daemon=True  # 设置为守护线程，主程序结束时自动结束
+        # )
+        # memory_thread.start()
+        
+        # 使用Celery异步处理长记忆
+        send_memory_message.delay({"type": "extract", "text": question, "ts": int(time.time())})
         
         graph = (StateGraph(state.State, context_schema=state.Context)
             .add_node("supervisor_node", self.supervisor_node)
