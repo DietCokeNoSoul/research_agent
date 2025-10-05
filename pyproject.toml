@@ -5,11 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "celery>=5.5.3",
     "dotenv>=0.9.9",
+    "langchain-mcp-adapters>=0.1.11",
     "langchain-openai>=0.3.33",
     "langgraph>=0.6.8",
     "langsmith>=0.4.31",
     "loguru>=0.7.3",
+    "mcp[cli]>=1.16.0",
     "torch",
     "torchvision",
 ]

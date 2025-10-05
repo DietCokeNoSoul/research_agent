@@ -6,48 +6,48 @@ Returns a predefined response. Replace logic and configuration as needed.
 from __future__ import annotations
 
 import os
+import time
 import uuid
+import threading
+import asyncio
 from loguru import logger
 
 from langgraph.runtime import Runtime
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.config import get_stream_writer
 # 用LangGraph studio不需要自定义内存存储
 from langgraph.checkpoint.memory import InMemorySaver
 
+
 from agent.langsmith_client import LangsmithClient
+from agent.memory_manager import Memory_Manager
+from agent.mcp_agent import MCPClient
 import agent.state as state
 
 class Agent:
     def __init__(self):
+        # 初始化节点和模型
         self.nodes = ["supervisor","search", "rag", "chat", "other"]
+        # 初始化大语言模型
         self.llm = ChatOpenAI(
-            model="qwen3-next-80b-a3b-instruct",
+            model="qwen3-next-80b-a3b-thinking",
             openai_api_key=os.getenv("QWEN_API_KEY"),
             openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
+        # 初始化监督模型
         self.supervisor_llm = ChatOpenAI(
             openai_api_base="http://localhost:11434/v1",
             openai_api_key="ollama",
             model="qwen3_lora_sft_supervisor_dpo",
         )
-        self.memory_llm = ChatOpenAI(
-            openai_api_base="http://localhost:11434/v1",
-            openai_api_key="ollama",
-            model="qwen3_lora_sft_memory_q8_0"
-        )
+        # 取带工具的agent
+        self.mcp_client = MCPClient(llm=self.llm)
+        # 记忆管理器
+        self.memory_manager = Memory_Manager(llm=self.llm)
+        # Langsmith客户端
         self.langsmith_client = LangsmithClient.langsmith_client()
         
-        
-    def get_long_memory(self, question: str) -> str:
-        response = self.memory_llm.invoke([SystemMessage(content="判断下面用户问题是否存在可以作为长记忆的重要信息，如果有则提取关键信息（短句或关键词），否则返回<None>。"), HumanMessage(content=question)])
-        response = response.content.split("\n")[-1]
-        if response == "<None>":
-            return ""
-        else:
-            return response
 
     def supervisor_node(self, state: state.State) -> str:
         logger.info(">>> Supervisor Node")
@@ -71,9 +71,25 @@ class Agent:
         return {"type": response}
 
 
-    def search_node(self, state: state.State) -> str:
+    def search_node(self, state: state.State) -> dict:
         logger.info(">>> Search Node")
-        return {"message": [HumanMessage(content="搜索响应")], "type": "search"}
+
+        # 获取搜索结果，传递完整的消息历史以保持上下文
+        if len(state["message"]) > 6: # 只保留最近6条消息，避免过长
+            search_messages = state["message"][-6:]
+        else:
+            search_messages = state["message"]
+        # 获取搜索结果
+        search_result = self.mcp_client.invoke_with_context(search_messages)
+
+        # 如果没有获取到结果，使用默认消息
+        if not search_result:
+            search_result = "搜索完成，但未找到相关结果。"
+            
+        if len(search_result) > 500:  # 短结果直接返回
+            search_result = self.memory_manager.summarize_search_result(search_result) # 结果过长，进行总结
+
+        return {"message": [AIMessage(content=search_result)], "type": "search"}
 
 
     def rag_node(self, state: state.State) -> str:
@@ -107,7 +123,16 @@ class Agent:
             return END
 
 
-    def agent(self, question: str):
+    def agent(self, question: str, clear_mcp_history: bool = False):
+        
+        # 启动异步任务处理长记忆，不阻塞graph执行
+        memory_thread = threading.Thread(
+            target=self.memory_manager._async_get_long_memory,
+            args=(question,),
+            daemon=True  # 设置为守护线程，主程序结束时自动结束
+        )
+        memory_thread.start()
+        
         graph = (StateGraph(state.State, context_schema=state.Context)
             .add_node("supervisor_node", self.supervisor_node)
             .add_node("search_node", self.search_node)
@@ -130,7 +155,7 @@ class Agent:
             stream_mode="updates"
         ):
             print(chunk)
-        
+
         # response = graph.invoke(
         #     {"message": [HumanMessage(content=question)]},
         #     config=config,
